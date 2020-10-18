@@ -1,19 +1,19 @@
 #!/usr/bin/env python3.8
-import tarfile
 import os
 import json
 import time
 
-from typing import Dict, Type, Union, TypedDict, Optional, IO, TypeVar
+from tarfile import TarFile, TarInfo, DIRTYPE
+from typing import Union, TypedDict, Optional, IO
 from io import BytesIO
 
-import unix_ar
+from unix_ar import ArFile, ArInfo
 import click
 
 
-DEB_VERSION = b'2.0\n'
+DEB_VERSION = b"2.0\n"
 
-CONTROL_TEMPLATE = '''Package: {id}
+CONTROL_TEMPLATE = """Package: {id}
 Version: {version}
 Section: misc
 Priority: optional
@@ -23,8 +23,9 @@ Maintainer: N/A <nobody@example.com>
 Description: This is a webOS application.
 webOS-Package-Format-Version: 2
 webOS-Packager-Version: x.y.x
-'''
+"""
 DIRECTORY_SIZE = 4096
+
 
 class AppInfo(TypedDict):
     id: str
@@ -44,12 +45,12 @@ class AppInfo(TypedDict):
 
 
 def get_appinfo(base_path) -> AppInfo:
-    appinfo_file = os.path.join(base_path, 'appinfo.json')
+    appinfo_file = os.path.join(base_path, "appinfo.json")
 
     if not os.path.isfile(appinfo_file):
         raise ValueError
 
-    with open(appinfo_file, 'rt') as fh:
+    with open(appinfo_file, "rt") as fh:
         return json.load(fh)
 
 
@@ -58,20 +59,21 @@ def gen_filename(appinfo: AppInfo) -> str:
 
 
 def gen_packageinfo(appinfo: AppInfo) -> bytes:
-    data = json.dumps({
-        "app": appinfo['id'],
-        "id": appinfo['id'],
-        "loc_name": appinfo['title'],
-        "vendor": appinfo['vendor'],
-        "version": appinfo['version'],
-    }, indent=2) + '\n'
+    packageinfo = {
+        "app": appinfo["id"],
+        "id": appinfo["id"],
+        "loc_name": appinfo["title"],
+        "vendor": appinfo["vendor"],
+        "version": appinfo["version"],
+    }
+    data = json.dumps(packageinfo, indent=2) + "\n"
 
-    return data.replace('\r\n', '\n').encode('utf-8')
+    return data.replace("\r\n", "\n").encode("utf-8")
 
 
 def gen_control(appinfo: AppInfo, size: int) -> bytes:
     control = CONTROL_TEMPLATE.format(size=size, **appinfo)
-    return control.replace('\r\n', '\n').encode('utf-8')
+    return control.replace("\r\n", "\n").encode("utf-8")
 
 
 def calc_size(base_path: str) -> int:
@@ -79,7 +81,7 @@ def calc_size(base_path: str) -> int:
     for base, dirs, files in os.walk(base_path):
         for d in dirs:
             dirpath = os.path.join(base, d)
-            print(dirpath + '/', DIRECTORY_SIZE)
+            print(dirpath + "/", DIRECTORY_SIZE)
             size += DIRECTORY_SIZE
 
         for f in files:
@@ -93,9 +95,9 @@ def calc_size(base_path: str) -> int:
 FileData = Union[str, bytes, IO[bytes]]
 
 
-def ar_addfile(ar: unix_ar.ArFile, name: str, data: FileData, size: Optional[int] = None):
+def ar_addfile(ar: ArFile, name: str, data: FileData, size: Optional[int] = None):
     if isinstance(data, str):
-        data = data.encode('utf-8')
+        data = data.encode("utf-8")
 
     if isinstance(data, bytes):
         if size is None:
@@ -107,9 +109,9 @@ def ar_addfile(ar: unix_ar.ArFile, name: str, data: FileData, size: Optional[int
         size = data.tell()
 
     if size is None:
-        raise ValueError('Unable to determine size, and no size provided.')
+        raise ValueError("Unable to determine size, and no size provided.")
 
-    info = unix_ar.ArInfo(name)
+    info = ArInfo(name)
     info.size = size
     info.mtime = int(time.time())
     info.perms = 0o666
@@ -122,9 +124,9 @@ def ar_addfile(ar: unix_ar.ArFile, name: str, data: FileData, size: Optional[int
     ar.addfile(info, data)
 
 
-def tar_addfile(tar: tarfile.TarFile, name: str, data: FileData, size: Optional[int] = None):
+def tar_addfile(tar: TarFile, name: str, data: FileData, size: Optional[int] = None):
     if isinstance(data, str):
-        data = data.encode('utf-8')
+        data = data.encode("utf-8")
 
     if isinstance(data, bytes):
         if size is None:
@@ -136,30 +138,30 @@ def tar_addfile(tar: tarfile.TarFile, name: str, data: FileData, size: Optional[
         size = data.tell()
 
     if size is None:
-        raise ValueError('Unable to determine size, and no size provided.')
+        raise ValueError("Unable to determine size, and no size provided.")
 
-    name = name.replace(os.path.sep, '/')
+    name = name.replace(os.path.sep, "/")
 
     # tar.getmembers  # Add directories if missing
     print(name)
     members = tar.getnames()
     print(members)
-    dir_elements = name.split('/')[:-1]
+    dir_elements = name.split("/")[:-1]
     if dir_elements:
-        for n in range(len(dir_elements)):
-            el = '/'.join(dir_elements[:n+1])
+        for n in range(1, len(dir_elements) + 1):
+            el = "/".join(dir_elements[:n])
             if el not in members:
                 print(el)
-                dir_info = tarfile.TarInfo(el)
+                dir_info = TarInfo(el)
                 dir_info.mtime = int(time.time())
                 dir_info.mode = 0o777
                 dir_info.uid = 1000
                 dir_info.gid = 1000
-                dir_info.type = tarfile.DIRTYPE
+                dir_info.type = DIRTYPE
 
                 tar.addfile(dir_info)
 
-    info = tarfile.TarInfo(name)
+    info = TarInfo(name)
     info.size = size
     info.mtime = int(time.time())
     info.mode = 0o666
@@ -186,21 +188,20 @@ def build(base_path: str, output: str):
     size += len(packageinfo_data)  # usr/palm/packages/{appinfo['id']}/packageinfo.json
     print(size)
 
-    ar = unix_ar.open(output, 'w')
+    ar = ArFile(open(output, "wb"), "w")
 
-    ar_addfile(ar, 'debian-binary', DEB_VERSION)
+    ar_addfile(ar, "debian-binary", DEB_VERSION)
 
     with BytesIO() as controlfh:
-        with tarfile.open(mode='w:gz', fileobj=controlfh) as control_tarfh:
+        with TarFile.open(mode="w:gz", fileobj=controlfh) as control_tarfh:
             control_data = gen_control(appinfo, size)
-            tar_addfile(control_tarfh, 'control', control_data)
+            tar_addfile(control_tarfh, "control", control_data)
 
-        ar_addfile(ar, 'control.tar.gz', controlfh)
-
+        ar_addfile(ar, "control.tar.gz", controlfh)
 
     with BytesIO() as datafh:
-        with tarfile.open(mode='w:gz', fileobj=datafh) as data_tarfh:
-            output_base = f'usr/palm/applications/{appinfo["id"]}'
+        with TarFile.open(mode="w:gz", fileobj=datafh) as data_tarfh:
+            output_base = f"usr/palm/applications/{appinfo['id']}"
 
             for base, dirs, files in os.walk(base_path):
                 rel_base = os.path.relpath(base, base_path)
@@ -211,20 +212,19 @@ def build(base_path: str, output: str):
                     rel_file = os.path.relpath(input_file, base_path)
                     archive_path = os.path.join(output_base, rel_file)
 
-                    with open(input_file, 'rb') as fh:
+                    with open(input_file, "rb") as fh:
                         tar_addfile(data_tarfh, archive_path, fh)
 
-
-            packageinfo_name = f'usr/palm/packages/{appinfo["id"]}/packageinfo.json'
+            packageinfo_name = f"usr/palm/packages/{appinfo['id']}/packageinfo.json"
             packageinfo_data = gen_packageinfo(appinfo)
             tar_addfile(data_tarfh, packageinfo_name, packageinfo_data)
 
-        ar_addfile(ar, 'data.tar.gz', datafh)
+        ar_addfile(ar, "data.tar.gz", datafh)
 
 
 @click.command()
-@click.argument('path', type=click.Path(exists=True, dir_okay=True, file_okay=False))
-@click.option('--output', type=click.Path(dir_okay=True, file_okay=True), default=None)
+@click.argument("path", type=click.Path(exists=True, dir_okay=True, file_okay=False))
+@click.option("--output", type=click.Path(dir_okay=True, file_okay=True), default=None)
 def cli(path: str, output: Optional[str] = None):
     appinfo = get_appinfo(path)
 
