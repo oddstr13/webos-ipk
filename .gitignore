@@ -1,0 +1,5 @@
+data/
+*.tar
+*.tar.gz
+*.ipk
+*.deb
