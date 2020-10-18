@@ -80,14 +80,11 @@ def calc_size(base_path: str) -> int:
     size = 0
     for base, dirs, files in os.walk(base_path):
         for d in dirs:
-            dirpath = os.path.join(base, d)
-            print(dirpath + "/", DIRECTORY_SIZE)
             size += DIRECTORY_SIZE
 
         for f in files:
             filepath = os.path.join(base, f)
             filesize = os.stat(filepath).st_size
-            print(filepath, filesize)
             size += filesize
     return size
 
@@ -142,17 +139,13 @@ def tar_addfile(tar: TarFile, name: str, data: FileData, size: Optional[int] = N
 
     name = name.replace(os.path.sep, "/")
 
-    # tar.getmembers  # Add directories if missing
-    print(name)
     members = tar.getnames()
-    print(members)
     dir_elements = name.split("/")[:-1]
     if dir_elements:
         for n in range(1, len(dir_elements) + 1):
-            el = "/".join(dir_elements[:n])
-            if el not in members:
-                print(el)
-                dir_info = TarInfo(el)
+            dirpath = "/".join(dir_elements[:n])
+            if dirpath not in members:
+                dir_info = TarInfo(dirpath)
                 dir_info.mtime = int(time.time())
                 dir_info.mode = 0o777
                 dir_info.uid = 1000
@@ -179,14 +172,10 @@ def build(base_path: str, output: str):
     size = calc_size(base_path)
     size += 4 * DIRECTORY_SIZE  # usr/palm/applications/{appinfo['id']}/
 
-    print(size)
     packageinfo_data = gen_packageinfo(appinfo)
-    print(repr(packageinfo_data))
-    print(len(packageinfo_data))
 
     size += 2 * DIRECTORY_SIZE  # usr/palm/./packages/{appinfo['id']}/
     size += len(packageinfo_data)  # usr/palm/packages/{appinfo['id']}/packageinfo.json
-    print(size)
 
     ar = ArFile(open(output, "wb"), "w")
 
@@ -236,6 +225,7 @@ def cli(path: str, output: Optional[str] = None):
         output_file = output
 
     build(path, output=output_file)
+    click.echo(output_file)
 
 
 if __name__ == "__main__":
