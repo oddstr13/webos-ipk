@@ -4,12 +4,11 @@ import os
 import json
 import time
 
-from typing import Dict, Union, TypedDict, Optional, IO, overload
+from typing import Dict, Type, Union, TypedDict, Optional, IO, TypeVar
 from io import BytesIO
 
 import unix_ar
 import click
-from unix_ar import ArFile
 
 
 DEB_VERSION = b'2.0\n'
@@ -51,7 +50,7 @@ def get_appinfo(base_path) -> AppInfo:
         raise ValueError
 
     with open(appinfo_file, 'rt') as fh:
-        return json.load(fh,)
+        return json.load(fh)
 
 
 def gen_filename(appinfo: AppInfo) -> str:
@@ -91,7 +90,10 @@ def calc_size(base_path: str) -> int:
     return size
 
 
-def ar_addfile(ar: unix_ar.ArFile, name: str, data: Union[str, bytes, IO[bytes]], size: Optional[int] = None):
+FileData = Union[str, bytes, IO[bytes]]
+
+
+def ar_addfile(ar: unix_ar.ArFile, name: str, data: FileData, size: Optional[int] = None):
     if isinstance(data, str):
         data = data.encode('utf-8')
 
@@ -120,7 +122,7 @@ def ar_addfile(ar: unix_ar.ArFile, name: str, data: Union[str, bytes, IO[bytes]]
     ar.addfile(info, data)
 
 
-def tar_addfile(tar: tarfile.TarFile, name: str, data: Union[str, bytes, IO[bytes]], size: Optional[int] = None):
+def tar_addfile(tar: tarfile.TarFile, name: str, data: FileData, size: Optional[int] = None):
     if isinstance(data, str):
         data = data.encode('utf-8')
 
@@ -136,17 +138,36 @@ def tar_addfile(tar: tarfile.TarFile, name: str, data: Union[str, bytes, IO[byte
     if size is None:
         raise ValueError('Unable to determine size, and no size provided.')
 
+    name = name.replace(os.path.sep, '/')
+
+    # tar.getmembers  # Add directories if missing
+    print(name)
+    members = tar.getnames()
+    print(members)
+    dir_elements = name.split('/')[:-1]
+    if dir_elements:
+        for n in range(len(dir_elements)):
+            el = '/'.join(dir_elements[:n+1])
+            if el not in members:
+                print(el)
+                dir_info = tarfile.TarInfo(el)
+                dir_info.mtime = int(time.time())
+                dir_info.mode = 0o777
+                dir_info.uid = 1000
+                dir_info.gid = 1000
+                dir_info.type = tarfile.DIRTYPE
+
+                tar.addfile(dir_info)
+
     info = tarfile.TarInfo(name)
     info.size = size
     info.mtime = int(time.time())
     info.mode = 0o666
-    info.uid = 0
-    info.gid = 0
+    info.uid = 1000
+    info.gid = 1000
 
     if data.seekable():
         data.seek(0)
-
-    # tar.getmembers  # Add directories if missing
 
     tar.addfile(info, data)
 
@@ -180,6 +201,19 @@ def build(base_path: str, output: str):
     with BytesIO() as datafh:
         with tarfile.open(mode='w:gz', fileobj=datafh) as data_tarfh:
             output_base = f'usr/palm/applications/{appinfo["id"]}'
+
+            for base, dirs, files in os.walk(base_path):
+                rel_base = os.path.relpath(base, base_path)
+
+                for file_name in files:
+                    input_file = os.path.join(base, file_name)
+
+                    rel_file = os.path.relpath(input_file, base_path)
+                    archive_path = os.path.join(output_base, rel_file)
+
+                    with open(input_file, 'rb') as fh:
+                        tar_addfile(data_tarfh, archive_path, fh)
+
 
             packageinfo_name = f'usr/palm/packages/{appinfo["id"]}/packageinfo.json'
             packageinfo_data = gen_packageinfo(appinfo)

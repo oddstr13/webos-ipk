@@ -3,3 +3,5 @@ data/
 *.tar.gz
 *.ipk
 *.deb
+
+*.py[ocd]
