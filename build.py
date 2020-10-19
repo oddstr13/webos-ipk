@@ -111,7 +111,7 @@ def ar_addfile(ar: ArFile, name: str, data: FileData, size: Optional[int] = None
     info = ArInfo(name)
     info.size = size
     info.mtime = int(time.time())
-    info.perms = 0o666
+    info.perms = 0o100644
     info.uid = 0
     info.gid = 0
 
@@ -176,6 +176,8 @@ def build(base_path: str, output: str):
 
     size += 2 * DIRECTORY_SIZE  # usr/palm/./packages/{appinfo['id']}/
     size += len(packageinfo_data)  # usr/palm/packages/{appinfo['id']}/packageinfo.json
+
+    size += DIRECTORY_SIZE  # TODO: I'm one off comared to ares-package, why?
 
     ar = ArFile(open(output, "wb"), "w")
 
